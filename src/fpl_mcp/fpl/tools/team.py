@@ -45,12 +45,44 @@ async def get_team_for_gameweek(gameweek: Optional[int] = None, team_id: int = 0
         return {"error": f"Invalid gameweek value: {gameweek}"}
     
     # Get team data for the gameweek
+    preseason_fallback = False
     try:
         gw_picks_data = await auth_manager.get_team_for_gameweek(team_id, gameweek)
     except Exception as e:
-        logger.error(f"Error fetching team data: {e}")
-        return {
-            "error": f"Failed to retrieve team data for gameweek {gameweek}: {str(e)}"
+        # Before the first deadline the event picks endpoint does not exist
+        # yet and returns 404. For the authenticated user's own team we can
+        # fall back to the my-team endpoint, which is live pre-season.
+        is_404 = "404" in str(e)
+        own_team = str(team_id) == str(auth_manager.team_id or "")
+        if not (is_404 and own_team):
+            logger.error(f"Error fetching team data: {e}")
+            return {
+                "error": f"Failed to retrieve team data for gameweek {gameweek}: {str(e)}",
+                **({"suggestion": "Picks for a gameweek only exist after its "
+                    "deadline has passed"} if is_404 else {}),
+            }
+        logger.info(
+            "Event picks endpoint returned 404 (pre-deadline); "
+            "falling back to the my-team endpoint"
+        )
+        preseason_fallback = True
+        my_team_data = await auth_manager.get_my_team(int(team_id))
+        # Reshape my-team picks into the event-picks shape. Multiplier is
+        # not part of the my-team payload, so derive it from position and
+        # the captain flag.
+        gw_picks_data = {
+            "picks": [
+                {
+                    "element": p.get("element"),
+                    "position": p.get("position"),
+                    "is_captain": p.get("is_captain", False),
+                    "is_vice_captain": p.get("is_vice_captain", False),
+                    "multiplier": 0 if p.get("position", 0) > 11
+                    else (2 if p.get("is_captain") else 1),
+                }
+                for p in my_team_data.get("picks", [])
+            ],
+            "entry_history": {},
         }
     
     # Get player data to enrich team information
@@ -169,6 +201,9 @@ async def get_team_for_gameweek(gameweek: Optional[int] = None, team_id: int = 0
     # Build full result
     result = {
         "gameweek": gameweek,
+        **({"note": "Gameweek picks are not published until the deadline "
+            "passes; showing the current squad from the my-team endpoint"}
+           if preseason_fallback else {}),
         "team_id": team_id,
         "team_name": manager_info.get("team_name", "Unknown"),
         "manager_name": manager_info.get("manager_name", "Unknown"),
