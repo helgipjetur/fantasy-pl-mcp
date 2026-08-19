@@ -9,6 +9,7 @@ from .live import register_tools as register_live_tools
 from .managers import register_tools as register_manager_tools
 from .players import register_tools as register_player_tools
 from .team import register_tools as register_team_tools
+from .transfers import register_tools as register_transfer_tools
 
 __all__ = [
     "register_advice_tools",
@@ -20,4 +21,5 @@ __all__ = [
     "register_manager_tools",
     "register_player_tools",
     "register_team_tools",
+    "register_transfer_tools",
 ]

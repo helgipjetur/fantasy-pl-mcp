@@ -37,6 +37,10 @@ EXPECTED_TOOLS = {
     "get_my_current_team",
     "get_manager_transfer_history",
     "get_price_changes",
+    # transfers.py (write tools)
+    "make_transfers",
+    "set_lineup",
+    "set_captain",
 }
 
 EXPECTED_PROMPTS = {

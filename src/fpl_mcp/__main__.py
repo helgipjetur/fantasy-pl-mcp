@@ -34,6 +34,7 @@ from .fpl.tools import (
     register_manager_tools,
     register_player_tools,
     register_team_tools,
+    register_transfer_tools,
 )
 
 # Register resources
@@ -150,6 +151,7 @@ register_fixture_tools(mcp)
 register_analysis_tools(mcp)
 register_live_tools(mcp)
 register_advice_tools(mcp)
+register_transfer_tools(mcp)
 
 # Register prompts
 @mcp.prompt()

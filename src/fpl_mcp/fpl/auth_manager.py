@@ -24,6 +24,9 @@ class FPLAuthManager:
     # Refresh the access token this many seconds before it actually expires.
     _EXPIRY_SAFETY_MARGIN = 60
 
+    # Minimum seconds between write (POST) requests
+    _MIN_WRITE_INTERVAL = 1.0
+
     def __init__(self):
         # Initialize credential manager
         self._credential_manager = CredentialManager()
@@ -43,6 +46,10 @@ class FPLAuthManager:
 
         # Shared rate limiter so authed and public requests draw from one budget
         self._rate_limiter = rate_limiter
+
+        # Write throttling state (one write per second, serialized)
+        self._write_lock = asyncio.Lock()
+        self._last_write_time = 0.0
 
     def set_credentials(self, refresh_token: str, team_id: str) -> None:
         """Set and store new credentials securely"""
@@ -193,6 +200,45 @@ class FPLAuthManager:
             self._access_token = None
             self._access_token_expiry = None
             raise
+
+    async def make_authed_post(self, url: str, json_body: Dict[str, Any]) -> "requests.Response":
+        """Make an authenticated POST to the FPL API and return the raw response.
+
+        Writes are never retried: the caller decides what a non-2xx response
+        means, because a blind retry of a transfer risks submitting it twice.
+        At most one write is sent per second regardless of caller behaviour.
+        """
+        session = await self.get_session()
+
+        await self._rate_limiter.acquire()
+
+        # Serialize writes and enforce the 1-write-per-second floor
+        async with self._write_lock:
+            now = asyncio.get_event_loop().time()
+            elapsed = now - self._last_write_time
+            if elapsed < self._MIN_WRITE_INTERVAL:
+                await asyncio.sleep(self._MIN_WRITE_INTERVAL - elapsed)
+
+            headers = {
+                "User-Agent": FPL_USER_AGENT,
+                "X-API-Authorization": f"Bearer {self._access_token}",
+                # The FPL web app sends these on writes; missing them is a
+                # known cause of silent 403s. TODO(step-0): reconcile with
+                # captured browser requests before first live write.
+                "Content-Type": "application/json",
+                "Referer": "https://fantasy.premierleague.com/",
+                "Origin": "https://fantasy.premierleague.com",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: session.post(url, json=json_body, headers=headers),
+            )
+            self._last_write_time = asyncio.get_event_loop().time()
+
+        return response
 
     async def make_authed_request(self, url: str) -> Dict[str, Any]:
         """Make an authenticated request to FPL API"""
