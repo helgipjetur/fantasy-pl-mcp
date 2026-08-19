@@ -201,7 +201,12 @@ class FPLAuthManager:
             self._access_token_expiry = None
             raise
 
-    async def make_authed_post(self, url: str, json_body: Dict[str, Any]) -> "requests.Response":
+    async def make_authed_post(
+        self,
+        url: str,
+        json_body: Dict[str, Any],
+        referer: str = "https://fantasy.premierleague.com/",
+    ) -> "requests.Response":
         """Make an authenticated POST to the FPL API and return the raw response.
 
         Writes are never retried: the caller decides what a non-2xx response
@@ -219,16 +224,20 @@ class FPLAuthManager:
             if elapsed < self._MIN_WRITE_INTERVAL:
                 await asyncio.sleep(self._MIN_WRITE_INTERVAL - elapsed)
 
+            # Header set confirmed against a captured entry-create POST from
+            # the real web app (2026-08-19): it sends content-type, origin,
+            # referer (full page path), x-api-language and an EMPTY
+            # x-csrftoken — and notably no X-Requested-With.
+            # TODO(step-0): re-verify against a captured my-team/transfers
+            # POST once available.
             headers = {
                 "User-Agent": FPL_USER_AGENT,
                 "X-API-Authorization": f"Bearer {self._access_token}",
-                # The FPL web app sends these on writes; missing them is a
-                # known cause of silent 403s. TODO(step-0): reconcile with
-                # captured browser requests before first live write.
                 "Content-Type": "application/json",
-                "Referer": "https://fantasy.premierleague.com/",
+                "Referer": referer,
                 "Origin": "https://fantasy.premierleague.com",
-                "X-Requested-With": "XMLHttpRequest",
+                "X-API-Language": "en",
+                "X-CSRFToken": "",
             }
 
             loop = asyncio.get_event_loop()

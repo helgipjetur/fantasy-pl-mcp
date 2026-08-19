@@ -226,7 +226,9 @@ async def _execute_transfers_post(
     }
 
     url = f"{FPL_API_BASE_URL}/transfers/"
-    response = await auth_manager.make_authed_post(url, payload)
+    response = await auth_manager.make_authed_post(
+        url, payload, referer="https://fantasy.premierleague.com/en/transfers"
+    )
 
     if not (200 <= response.status_code < 300):
         return (
@@ -356,7 +358,9 @@ async def _submit_picks(state: TeamState, new_picks: Sequence[Pick]) -> str:
     # TODO(step-0): payload shape to be confirmed against captured requests
     payload = {"chip": None, "picks": _build_picks_payload(new_picks)}
     url = f"{FPL_API_BASE_URL}/my-team/{state.entry_id}/"
-    response = await auth_manager.make_authed_post(url, payload)
+    response = await auth_manager.make_authed_post(
+        url, payload, referer="https://fantasy.premierleague.com/en/my-team"
+    )
 
     if not (200 <= response.status_code < 300):
         return (
