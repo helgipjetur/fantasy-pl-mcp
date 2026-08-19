@@ -310,7 +310,9 @@ variables (all optional):
 - Write support (this fork): `make_transfers`, `set_lineup`, and `set_captain`
   can manage the authenticated team. All three default to `dry_run=True`,
   never retry failed writes, and refuse point hits unless `confirm_hit=True`.
-  Chip activation is not supported — activate chips in the browser.
+  Chips ride the same writes via the `chip` parameter: `wildcard`/`freehit`
+  with `make_transfers`, `bboost`/`3xc` with `set_lineup`/`set_captain` —
+  validated against the entry's chip availability before any HTTP call.
 
 ## Troubleshooting
 

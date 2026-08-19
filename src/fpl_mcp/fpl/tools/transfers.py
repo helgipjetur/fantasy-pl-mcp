@@ -37,16 +37,40 @@ logger = logging.getLogger(__name__)
 
 PlayerRef = Union[str, int]
 
-CHIP_ERROR = "Chip activation is not supported — activate chips in the browser."
+# Chips ride on the write payloads' "chip" field. Transfer chips go with
+# the transfers POST, picks chips with the my-team POST.
+TRANSFER_CHIPS = {"wildcard", "freehit"}
+PICKS_CHIPS = {"bboost", "3xc"}
 
 
 def _fmt_money(tenths: int) -> str:
     return f"£{tenths / 10.0:.1f}m"
 
 
-def _reject_chip(chip: Any) -> None:
-    if chip is not None:
-        raise ValidationError(CHIP_ERROR)
+def _validate_chip(chip: Any, state: "TeamState", allowed: set) -> None:
+    """Check a requested chip is of the right kind and currently available."""
+    if chip is None:
+        return
+    if chip not in TRANSFER_CHIPS | PICKS_CHIPS:
+        raise ValidationError(
+            f"Unknown chip '{chip}'. Valid chips: wildcard, freehit (with "
+            f"make_transfers), bboost, 3xc (with set_lineup/set_captain)."
+        )
+    if chip not in allowed:
+        right_tool = "make_transfers" if chip in TRANSFER_CHIPS else \
+            "set_lineup or set_captain"
+        raise ValidationError(
+            f"Chip '{chip}' cannot be played with this tool — use {right_tool}."
+        )
+    status = next(
+        (c.status_for_entry for c in state.chips if c.name == chip), None
+    )
+    if status != "available":
+        raise ValidationError(
+            f"Chip '{chip}' is not available for this entry"
+            + (f" (status: {status})" if status else " (not offered this gameweek)")
+            + "."
+        )
 
 
 async def _club_names() -> Dict[int, str]:
@@ -206,13 +230,14 @@ async def _execute_transfers_post(
     state: TeamState,
     event_id: int,
     resolved: Sequence[Tuple[Pick, Dict[str, Any]]],
+    chip: Optional[str] = None,
 ) -> str:
     """POST the transfers payload once and confirm from re-fetched state."""
     auth_manager = get_auth_manager()
 
     # TODO(step-0): payload shape to be confirmed against captured requests
     payload = {
-        "chip": None,
+        "chip": chip,
         "entry": state.entry_id,
         "event": event_id,
         "transfers": [
@@ -262,12 +287,11 @@ async def _make_transfers(
     confirm_hit: bool = False,
     chip: Optional[str] = None,
 ) -> str:
-    _reject_chip(chip)
-
     if not transfers:
         raise ValidationError("No transfers given")
 
     state = await fetch_team_state(use_cache=False)
+    _validate_chip(chip, state, TRANSFER_CHIPS)
     event_id, deadline = await _check_deadline()
     clubs = await _club_names()
 
@@ -307,14 +331,20 @@ async def _make_transfers(
         [i.get("now_cost", 0) for _, i in resolved],
     )
 
-    points_hit = compute_points_hit(
+    # An active wildcard/free hit makes every transfer free
+    points_hit = 0 if chip else compute_points_hit(
         len(resolved), state.transfers.limit, state.transfers.cost
     )
     free = state.transfers.limit
-    free_text = "unlimited" if free is None else str(free)
+    free_text = "unlimited (chip)" if chip else (
+        "unlimited" if free is None else str(free)
+    )
 
     plan = [f"Transfer plan for gameweek {event_id} "
             f"(deadline {deadline.isoformat()} UTC):"]
+    if chip:
+        plan.append(f"  CHIP ACTIVE: {chip} — this cannot be undone once "
+                    f"submitted")
     for pick, info in resolved:
         plan.append(
             f"  OUT {pick.web_name} (sell {_fmt_money(pick.selling_price)}) "
@@ -336,7 +366,7 @@ async def _make_transfers(
             f"with confirm_hit=True to accept the hit."
         )
 
-    result = await _execute_transfers_post(state, event_id, resolved)
+    result = await _execute_transfers_post(state, event_id, resolved, chip=chip)
     return f"{plan_text}\n\n{result}"
 
 
@@ -352,15 +382,18 @@ def _build_picks_payload(picks: Sequence[Pick]) -> List[Dict[str, Any]]:
     ]
 
 
-async def _submit_picks(state: TeamState, new_picks: Sequence[Pick]) -> str:
+async def _submit_picks(
+    state: TeamState, new_picks: Sequence[Pick], chip: Optional[str] = None
+) -> str:
     """POST the full picks array once and confirm from re-fetched state.
 
     Payload confirmed against a captured Pick Team save (2026-08-19);
-    see docs/write-api-notes.md.
+    see docs/write-api-notes.md. The chip value rides the same field the
+    captured payload carried as null.
     """
     auth_manager = get_auth_manager()
 
-    payload = {"chip": None, "picks": _build_picks_payload(new_picks)}
+    payload = {"chip": chip, "picks": _build_picks_payload(new_picks)}
     url = f"{FPL_API_BASE_URL}/my-team/{state.entry_id}/"
     response = await auth_manager.make_authed_post(
         url, payload, referer="https://fantasy.premierleague.com/en/my-team"
@@ -437,9 +470,8 @@ async def _set_lineup(
     dry_run: bool = True,
     chip: Optional[str] = None,
 ) -> str:
-    _reject_chip(chip)
-
     state = await fetch_team_state(use_cache=False)
+    _validate_chip(chip, state, PICKS_CHIPS)
     await _check_deadline()
     clubs = await _club_names()
 
@@ -492,19 +524,22 @@ async def _set_lineup(
     )
 
     diff = _lineup_diff(state.picks, new_picks)
+    chip_line = f"CHIP ACTIVE: {chip}\n" if chip else ""
     if dry_run:
-        return f"Planned lineup:\n{diff}\n\nDRY RUN — nothing was submitted."
+        return f"Planned lineup:\n{chip_line}{diff}\n\nDRY RUN — nothing was submitted."
 
-    result = await _submit_picks(state, new_picks)
-    return f"Planned lineup:\n{diff}\n\n{result}"
+    result = await _submit_picks(state, new_picks, chip=chip)
+    return f"Planned lineup:\n{chip_line}{diff}\n\n{result}"
 
 
 async def _set_captain(
     captain: PlayerRef,
     vice_captain: Optional[PlayerRef] = None,
     dry_run: bool = True,
+    chip: Optional[str] = None,
 ) -> str:
     state = await fetch_team_state(use_cache=False)
+    _validate_chip(chip, state, PICKS_CHIPS)
     await _check_deadline()
     clubs = await _club_names()
 
@@ -542,11 +577,12 @@ async def _set_captain(
     )
 
     diff = _lineup_diff(state.picks, new_picks)
+    chip_line = f"CHIP ACTIVE: {chip}\n" if chip else ""
     if dry_run:
-        return f"Planned captaincy change:\n{diff}\n\nDRY RUN — nothing was submitted."
+        return f"Planned captaincy change:\n{chip_line}{diff}\n\nDRY RUN — nothing was submitted."
 
-    result = await _submit_picks(state, new_picks)
-    return f"Planned captaincy change:\n{diff}\n\n{result}"
+    result = await _submit_picks(state, new_picks, chip=chip)
+    return f"Planned captaincy change:\n{chip_line}{diff}\n\n{result}"
 
 
 def register_tools(mcp):
@@ -566,8 +602,10 @@ def register_tools(mcp):
             dry_run: When True (default), only return the plan — no write.
             confirm_hit: Must be True to execute a plan that costs a points
                 hit; without it the tool refuses even when dry_run=False.
-            chip: Not supported; any value is rejected. Activate chips in
-                the browser.
+            chip: Optional transfer chip to play with these transfers:
+                "wildcard" or "freehit". Must be available for the entry.
+                Chip transfers never cost points. Irreversible once
+                submitted.
 
         Returns:
             The transfer plan, and on execution the confirmed
@@ -602,8 +640,9 @@ def register_tools(mcp):
             vice_captain: New vice captain; defaults to the current one
             dry_run: When True (default), only return the before/after
                 diff — no write
-            chip: Not supported; any value is rejected. Activate chips in
-                the browser.
+            chip: Optional picks chip to play with this lineup: "bboost"
+                (bench boost) or "3xc" (triple captain). Must be available
+                for the entry.
 
         Returns:
             A readable before/after diff, and on execution the confirmed
@@ -626,6 +665,7 @@ def register_tools(mcp):
         captain: PlayerRef,
         vice_captain: Optional[PlayerRef] = None,
         dry_run: bool = True,
+        chip: Optional[str] = None,
     ) -> str:
         """Change your captain (and optionally vice captain) only.
 
@@ -636,6 +676,8 @@ def register_tools(mcp):
             vice_captain: New vice captain; defaults to the current one
             dry_run: When True (default), only return the before/after
                 diff — no write
+            chip: Optional picks chip to play: "3xc" (triple captain) or
+                "bboost". Must be available for the entry.
 
         Returns:
             A readable before/after diff, and on execution the confirmed
@@ -643,7 +685,7 @@ def register_tools(mcp):
         """
         try:
             return await _set_captain(
-                captain, vice_captain=vice_captain, dry_run=dry_run
+                captain, vice_captain=vice_captain, dry_run=dry_run, chip=chip
             )
         except (ValidationError, ValueError) as e:
             return f"REJECTED: {e}"

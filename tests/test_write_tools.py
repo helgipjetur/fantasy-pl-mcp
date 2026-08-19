@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fpl_mcp.fpl.team_state import Pick, TeamState, TransferState
+from fpl_mcp.fpl.team_state import ChipState, Pick, TeamState, TransferState
 from fpl_mcp.fpl.validation import compute_points_hit
 from fpl_mcp.fpl.tools.transfers import register_tools
 
@@ -64,14 +64,14 @@ SQUAD_SPEC = [
 ]
 
 
-def make_state(limit=1, cost=4, bank=5):
+def make_state(limit=1, cost=4, bank=5, chips=()):
     picks = [mk_pick(*spec) for spec in SQUAD_SPEC]
     return TeamState(
         entry_id=999,
         picks=sorted(picks, key=lambda p: p.position),
         transfers=TransferState(limit=limit, cost=cost, made=0, bank=bank,
                                 value=1000),
-        chips=[],
+        chips=list(chips),
     )
 
 
@@ -280,14 +280,65 @@ async def test_unknown_incoming_name():
     post.assert_not_called()
 
 
-async def test_chip_argument_rejected():
+async def test_picks_chip_rejected_on_transfers():
+    result, post = await run_tool(
+        "make_transfers", transfers=[{"out": "F1", "in": 101}],
+        chip="bboost",
+    )
+    assert result.startswith("REJECTED")
+    assert "cannot be played with this tool" in result
+    post.assert_not_called()
+
+
+async def test_unavailable_chip_rejected():
     result, post = await run_tool(
         "make_transfers", transfers=[{"out": "F1", "in": 101}],
         chip="wildcard",
     )
     assert result.startswith("REJECTED")
-    assert "Chip activation is not supported" in result
+    assert "not available" in result
     post.assert_not_called()
+
+
+async def test_wildcard_makes_transfers_free():
+    state = make_state(
+        chips=[ChipState(name="wildcard", status_for_entry="available")]
+    )
+    result, post = await run_tool(
+        "make_transfers",
+        transfers=[{"out": "F1", "in": 101}, {"out": "F2", "in": 107}],
+        state=state, chip="wildcard",
+    )
+    assert "CHIP ACTIVE: wildcard" in result
+    assert "Points hit: 0" in result
+    assert "DRY RUN" in result
+    post.assert_not_called()
+
+
+async def test_triple_captain_via_set_captain():
+    state = make_state(
+        chips=[ChipState(name="3xc", status_for_entry="available")]
+    )
+    result, post = await run_tool(
+        "set_captain", captain="M2", state=state, chip="3xc",
+    )
+    assert "CHIP ACTIVE: 3xc" in result
+    assert "DRY RUN" in result
+    post.assert_not_called()
+
+
+async def test_chip_payload_carries_chip_name():
+    pre = make_state(
+        chips=[ChipState(name="bboost", status_for_entry="available")]
+    )
+    post_state = make_state()
+    result, post = await run_tool(
+        "set_lineup", starting=XI_NAMES, bench_order=BENCH_NAMES,
+        dry_run=False, chip="bboost", states=[pre, post_state],
+    )
+    post.assert_called_once()
+    _, payload = post.call_args.args
+    assert payload["chip"] == "bboost"
 
 
 async def test_deadline_passed_rejects_write():
