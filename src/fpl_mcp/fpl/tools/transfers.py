@@ -5,8 +5,9 @@ All tools default to dry_run=True and never retry a failed write.
 
 Captured-contract status (see docs/write-api-notes.md):
 - my-team save (set_lineup/set_captain): CONFIRMED against a real capture
-- transfers: TODO(step-0) — capture only possible after the GW1 deadline;
-  reconcile the payload then. If the capture disagrees, the capture wins.
+- transfers: CONFIRMED by a successful live execution (2026-08-19)
+- chips: implemented on the confirmed payloads' chip field; a non-null
+  chip value is unobserved until the first chip play
 - pre-season squad creation uses /api/entry-create/ and is out of scope
 """
 
@@ -232,10 +233,13 @@ async def _execute_transfers_post(
     resolved: Sequence[Tuple[Pick, Dict[str, Any]]],
     chip: Optional[str] = None,
 ) -> str:
-    """POST the transfers payload once and confirm from re-fetched state."""
+    """POST the transfers payload once and confirm from re-fetched state.
+
+    Payload confirmed by a successful live execution (2026-08-19);
+    see docs/write-api-notes.md.
+    """
     auth_manager = get_auth_manager()
 
-    # TODO(step-0): payload shape to be confirmed against captured requests
     payload = {
         "chip": chip,
         "entry": state.entry_id,

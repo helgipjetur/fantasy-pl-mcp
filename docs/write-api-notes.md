@@ -68,9 +68,13 @@ Captured from Pick Team → Save Your Team (captain change, 2026-08-19):
 
 This matches the implemented `_submit_picks` payload exactly.
 
-## In-season: transfers (PENDING CAPTURE — only possible after GW1 deadline)
+## Transfers (CONFIRMED by live execution, 2026-08-19 pre-season)
 
-Expected `POST /api/transfers/` with
-`{"chip": ..., "entry": ..., "event": ..., "transfers": [{element_in,
-element_out, purchase_price, selling_price}]}`. To be confirmed after the
-first deadline passes.
+`POST /api/transfers/` with
+`{"chip": null, "entry": <id>, "event": <gw>, "transfers": [{element_in,
+element_out, purchase_price, selling_price}]}` was executed live before
+the GW1 deadline (Tarkowski → Senesi) and accepted; the squad change was
+verified by re-reading the my-team endpoint. Notably the endpoint DOES
+work pre-season, contrary to the initial worry that pre-deadline edits
+might route elsewhere. Still unobserved in the wild: in-season points-hit
+handling and the chip field carrying a non-null value (wildcard/freehit).
