@@ -3,10 +3,11 @@
 
 All tools default to dry_run=True and never retry a failed write.
 
-TODO(step-0): The write payload shapes and endpoints below follow the
-expected contract in the handoff. They MUST be reconciled against real
-captured browser requests before the first live write. If the capture
-disagrees, the capture wins.
+Captured-contract status (see docs/write-api-notes.md):
+- my-team save (set_lineup/set_captain): CONFIRMED against a real capture
+- transfers: TODO(step-0) — capture only possible after the GW1 deadline;
+  reconcile the payload then. If the capture disagrees, the capture wins.
+- pre-season squad creation uses /api/entry-create/ and is out of scope
 """
 
 import json
@@ -352,10 +353,13 @@ def _build_picks_payload(picks: Sequence[Pick]) -> List[Dict[str, Any]]:
 
 
 async def _submit_picks(state: TeamState, new_picks: Sequence[Pick]) -> str:
-    """POST the full picks array once and confirm from re-fetched state."""
+    """POST the full picks array once and confirm from re-fetched state.
+
+    Payload confirmed against a captured Pick Team save (2026-08-19);
+    see docs/write-api-notes.md.
+    """
     auth_manager = get_auth_manager()
 
-    # TODO(step-0): payload shape to be confirmed against captured requests
     payload = {"chip": None, "picks": _build_picks_payload(new_picks)}
     url = f"{FPL_API_BASE_URL}/my-team/{state.entry_id}/"
     response = await auth_manager.make_authed_post(

@@ -4,7 +4,7 @@ Findings from real browser captures (Chrome DevTools, 2026-08-19,
 pre-season before the GW1 deadline). Tokens/cookies redacted. These
 captures win over any assumed payload shape.
 
-## Common request headers (confirmed on entry-create and entry-autopick)
+## Common request headers (confirmed on entry-create, entry-autopick, and my-team)
 
 The web app sends, alongside the usual browser headers:
 
@@ -47,11 +47,26 @@ endpoints — **not** `/api/transfers/`:
 The write tools in this fork target the in-season contract only; the
 pre-season path above is documented so nobody mistakes one for the other.
 
-## In-season: lineup/captain save (PENDING CAPTURE)
+## In-season: lineup/captain save (CONFIRMED)
 
-Expected `POST /api/my-team/{entry_id}/` with
-`{"chip": ..., "picks": [{element, position, is_captain, is_vice_captain}]}`.
-To be confirmed by capturing the Pick Team → Save request.
+Captured from Pick Team → Save Your Team (captain change, 2026-08-19):
+
+- `POST /api/my-team/{entry_id}/`
+- Referer: `https://fantasy.premierleague.com/en/my-team`
+- Body: the FULL picks array, even for a captain-only change:
+
+  ```json
+  {
+    "chip": null,
+    "picks": [
+      {"element": 529, "position": 1,
+       "is_captain": false, "is_vice_captain": true},
+      ... (all 15, positions 1-15)
+    ]
+  }
+  ```
+
+This matches the implemented `_submit_picks` payload exactly.
 
 ## In-season: transfers (PENDING CAPTURE — only possible after GW1 deadline)
 
